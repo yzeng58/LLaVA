@@ -48,16 +48,17 @@ def load_images(image_files):
     return out
 
 
-def eval_model(args):
+def eval_model(query, image_files, tokenizer, model, image_processor, context_len, args, device):
     # Model
     disable_torch_init()
 
-    model_name = get_model_name_from_path(args.model_path)
-    tokenizer, model, image_processor, context_len = load_pretrained_model(
-        args.model_path, args.model_base, model_name
-    )
+    # model_name = get_model_name_from_path(args.model_path)
+    # tokenizer, model, image_processor, context_len = load_pretrained_model(
+    #     args.model_path, args.model_base, model_name
+    # )
 
-    qs = args.query
+    # qs = args.query
+    qs = query
     image_token_se = DEFAULT_IM_START_TOKEN + DEFAULT_IMAGE_TOKEN + DEFAULT_IM_END_TOKEN
     if IMAGE_PLACEHOLDER in qs:
         if model.config.mm_use_im_start_end:
@@ -68,16 +69,18 @@ def eval_model(args):
         if model.config.mm_use_im_start_end:
             qs = image_token_se + "\n" + qs
         else:
-            qs = DEFAULT_IMAGE_TOKEN + "\n" + qs
+            if image_files: qs = DEFAULT_IMAGE_TOKEN + "\n" + qs
 
-    if "llama-2" in model_name.lower():
-        conv_mode = "llava_llama_2"
-    elif "v1" in model_name.lower():
-        conv_mode = "llava_v1"
-    elif "mpt" in model_name.lower():
-        conv_mode = "mpt"
-    else:
-        conv_mode = "llava_v0"
+    # if "llama-2" in model_name.lower():
+    #     conv_mode = "llava_llama_2"
+    # elif "v1" in model_name.lower():
+    #     conv_mode = "llava_v1"
+    # elif "mpt" in model_name.lower():
+    #     conv_mode = "mpt"
+    # else:
+    #     conv_mode = "llava_v0"
+    
+    conv_mode = "llava_v1"
 
     if args.conv_mode is not None and conv_mode != args.conv_mode:
         print(
@@ -93,19 +96,30 @@ def eval_model(args):
     conv.append_message(conv.roles[1], None)
     prompt = conv.get_prompt()
 
-    image_files = image_parser(args)
-    images = load_images(image_files)
-    images_tensor = process_images(
-        images,
-        image_processor,
-        model.config
-    ).to(model.device, dtype=torch.float16)
+    # image_files = image_parser(args)
+    if image_files:
+        images = load_images(image_files)
+        # images = [load_image(image_file)]
+        images_tensor = process_images(
+            images,
+            image_processor,
+            model.config
+        ).to(model.device, dtype=torch.float16)
+    else:
+        images_tensor = None
 
-    input_ids = (
-        tokenizer_image_token(prompt, tokenizer, IMAGE_TOKEN_INDEX, return_tensors="pt")
-        .unsqueeze(0)
-        .cuda()
-    )
+    if device == 'cuda':
+        input_ids = (
+            tokenizer_image_token(prompt, tokenizer, IMAGE_TOKEN_INDEX, return_tensors="pt")
+            .unsqueeze(0)
+            .cuda()
+        )
+    else:
+        input_ids = (
+            tokenizer_image_token(prompt, tokenizer, IMAGE_TOKEN_INDEX, return_tensors="pt")
+            .unsqueeze(0)
+            .cuda(int(device[5:]))
+        )
 
     stop_str = conv.sep if conv.sep_style != SeparatorStyle.TWO else conv.sep2
     keywords = [stop_str]
@@ -137,7 +151,8 @@ def eval_model(args):
     if outputs.endswith(stop_str):
         outputs = outputs[: -len(stop_str)]
     outputs = outputs.strip()
-    print(outputs)
+    # print(outputs)
+    return outputs
 
 
 if __name__ == "__main__":
